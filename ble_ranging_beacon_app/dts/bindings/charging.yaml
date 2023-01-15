@@ -1,0 +1,17 @@
+# Copyright (c) 2021, Silvano Cortesi
+# Copyright (c) 2021, ETH Zürich
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+    Description for a charging pin
+
+compatible: "charging"
+
+include: base.yaml
+
+properties:
+    charging-gpios:
+      type: phandle-array
+      required: false
+      description: |
+        Charging indication pin.
