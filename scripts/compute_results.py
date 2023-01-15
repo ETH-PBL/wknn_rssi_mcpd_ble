@@ -45,10 +45,10 @@ def plot_beautify(k, metric, method: str):
 
 def plot_store(k, metric, method):
     if k == 0:
-        plt.legend(["Beacons","Train Pos.","Reference"], scatteryoffsets=[0.5,0.5,0.5,0.5], bbox_to_anchor=(0.5,1.1), ncol=4, columnspacing=0.5, handletextpad=-0.2, loc='upper center')
+        plt.legend(["Beacons","Train Pos.","Reference"], scatteryoffsets=[0.5,0.5,0.5], bbox_to_anchor=(0.5,1.1), ncol=3, columnspacing=0.5, handletextpad=-0.2, loc='upper center')
         plt.savefig("../figures/room_setup.svg")
     else:
-        plt.legend(["Beacons","Train Pos.","Reference","Estimation"], scatteryoffsets=[0.5,0.5,0.5,0.5], bbox_to_anchor=(0.5,1.1), ncol=4, columnspacing=0.5, handletextpad=-0.2, loc='upper center')
+        plt.legend(["Beacons","Train Pos.","Ref.","Est.", "Avg. Est."], scatteryoffsets=[0.5,0.5,0.5,0.5,0.5], bbox_to_anchor=(0.5,1.1), ncol=5, columnspacing=0.4, handletextpad=-0.3, loc='upper center')
         plt.savefig("../figures/k{}_{}_{}.svg".format(k, str(metric).lower(), method.lower()))
 
         
@@ -91,7 +91,11 @@ avg_results: Dict[int, Dict[Metric, Dict[int, Result]]] = {}
 for k in [3,5]:
     avg_results[k] = {}
     for metric in Metric:
-        avg_results[k][metric] = dict([(key, Result.average(value)) for key, value in results[k][metric].items()])
+        avg_results[k][metric] = {}
+        for p in configs.room.train_points:
+            avg_results[k][metric][p] = get_estimation_point_from_average(k, p, metric)
+        for p in configs.room.validation_points:
+            avg_results[k][metric][p] = get_estimation_point_from_average(k, p, metric)
 
 # Generate Markdown table with average results
 for k in [3,5]:
@@ -145,6 +149,6 @@ for k, metric, method in itertools.product([3, 5], [metric.EUCLID, metric.CHEBYS
         plt.scatter(x, y, 5, alpha=0.6, marker='o', color=colors[idx])
         plt.scatter(x_avg, y_avg, 75, alpha=0.6, marker='o', color=colors[idx])
             
-     plot_store(k, metric, method)
+    plot_store(k, metric, method)
 
 plt.show()
