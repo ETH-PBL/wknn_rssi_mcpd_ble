@@ -5,12 +5,14 @@ from typing import Dict, List
 import configs
 from wknn import Metric, get_estimation_point, Result, get_estimation_point_from_average
 from pytablewriter import MarkdownTableWriter
+import itertools
 from pytablewriter.style import Style
 import matplotlib.pyplot as plt
 from math import ceil
 import seaborn as sns
 import pandas as pd
 import itertools
+from collections import defaultdict
 import numpy as np
 
 def plot_beautify(k, metric, method: str):
@@ -92,113 +94,170 @@ def histogram_boxplot(data, k, metric, method: str, xlim: List = [], bins = None
     plt.close('all')
 
         
-# Dict[k][metric][point] = List[Result]
-results: Dict[int, Dict[Metric, Dict[int, List[Result]]]] = {}
-
-# Get results for k = 3,5 and Chebyshev,Euclid norm, using Test set and Validation set
-for k in [3,5]:
-    results[k] = {}
-    for metric in Metric:
-        results[k][metric] = {}
-        for p in configs.room.train_points:
-            results[k][metric][p] = [get_estimation_point_from_average(k, p, metric)]
-        
-        # For each validation position
-        for p in configs.room.validation_points:
-            # Generate empty result list
-            results[k][metric][p] = []
-            # Load the dataframes at this position and store them in the dictionary
-            df = {}
-            for b in configs.room.beacons:
-                df[b.n] = pd.read_csv("{}position_{}_beacon_{}.csv".format(configs.validation_set_path, p, b.n))
-            # Check length of measurement, on first one
-            length = len(list(df.items())[0][1].index)
-            # For each measurement, perform an estimation
-            for i in range(length):
-                # Storage element for the measurement to be performed
-                measurement = pd.DataFrame()
-                # Combine data from the individual beacons into 'measurement'
-                for b in df.keys():
-                    val = df[b].iloc[i,2:].to_frame().T
-                    val.insert(0, 'position', p)
-                    val.insert(1, 'id', b)
-                    measurement = pd.concat([measurement, val])
-                # Evaluate the measurement, and append to results
-                results[k][metric][p].append(get_estimation_point(k, p, metric, measurement))        
-
-# Compute average results:
-avg_results: Dict[int, Dict[Metric, Dict[int, Result]]] = {}
-for k in [3,5]:
-    avg_results[k] = {}
-    for metric in Metric:
-        avg_results[k][metric] = {}
-        for p in configs.room.train_points:
-            avg_results[k][metric][p] = get_estimation_point_from_average(k, p, metric)
-        for p in configs.room.validation_points:
-            avg_results[k][metric][p] = get_estimation_point_from_average(k, p, metric)
-
-# Generate Markdown table with average results
-for k in [3,5]:
-    for metric in Metric:
-        idx = [p.idx for p in avg_results[k][metric].values()]
-        # Calculate average results
-        rssi_error = [p.rssi_euc_error for p in avg_results[k][metric].values()]
-        mcpd_error = [p.mcpd_euc_error for p in avg_results[k][metric].values()]
-        # Create dataframe with this informations
-        df = pd.DataFrame(data=[rssi_error, mcpd_error], columns=idx).round(decimals=3)
-        df.insert(0, "Type", ["RSSI", "MCPD"])
-        # Write markdown table
-        writer = MarkdownTableWriter(
-            table_name="k{}_{}_error".format(k, metric),
-            margin=1,
-        )
-        writer.from_dataframe(
-            df,
-            add_index_column=False,
-        )
-        writer.set_style(0, Style(font_weight="bold"))
-        # Print Markdown Table
-        print(writer.dumps())
 
 
-# Generate plots:
-colors = [(0, 0.4470, 0.7410), (0.8500, 0.3250, 0.0980), (0.9290, 0.6940, 0.1250), (0.4940, 0.1840, 0.5560), (0.4660, 0.6740, 0.1880), (0.3010, 0.7450, 0.9330), (0.6350, 0.0780, 0.1840)]
+combinations = []
+all_results: Dict[int, Dict[int, Dict[Metric, Dict[str, List[float]]]]] = defaultdict(dict)
+for i in range(3, len(configs.room.beacons)+1):
+    combinations += list(itertools.combinations(configs.room.beacons, i))
+    # Create empty all_results dict
+    all_results[i] = dict()
+    for k in [3, 5]:
+        all_results[i][k] = dict()
+        for metric in [Metric.EUCLID, Metric.CHEBYSHEV]:
+            all_results[i][k][metric] = dict()
+            for method in ["RSSI", "MCPD"]:
+                all_results[i][k][metric][method] = dict()
+                all_results[i][k][metric][method]["var"] = []
+                all_results[i][k][metric][method]["std"] = []
+                all_results[i][k][metric][method]["avg"] = []
+                all_results[i][k][metric][method]["max"] = []
+                all_results[i][k][metric][method]["min"] = []
+                
 
-# Generate overview plot
-plot_beautify(0, None, None)
-for idx, p in enumerate(configs.room.validation_points.values()):
-    plt.scatter(p.x, p.y, 75, marker='*', color=colors[idx])
-plot_store(0, None, None)
+    
+for b in combinations:
+    beacons = list(b)
+    print("# Beacons: " + str(list(map(lambda b: b.n, beacons))))
+    # Dict[k][metric][point] = List[Result]
+    results: Dict[int, Dict[Metric, Dict[int, List[Result]]]] = {}
 
-for k, metric, method in itertools.product([3, 5], [metric.EUCLID, metric.CHEBYSHEV], ["RSSI", "MCPD"]):
-    # Generate plot
-    plot_beautify(k, metric, method)
-    for idx,(p,point) in enumerate(configs.room.validation_points.items()):
-        res = get_estimation_point_from_average(k, p, metric)
-        plt.scatter(point.x, point.y, 75, marker='*', color=colors[idx])
-        if method == "RSSI":
-            x = [val.rssi_estimation.x for val in results[k][metric][p]]
-            x_avg = avg_results[k][metric][p].rssi_estimation.x
-            y = [val.rssi_estimation.y for val in results[k][metric][p]]
-            y_avg = avg_results[k][metric][p].rssi_estimation.y
-        else:
-            x = [val.mcpd_estimation.x for val in results[k][metric][p]]
-            x_avg = avg_results[k][metric][p].mcpd_estimation.x
-            y = [val.mcpd_estimation.y for val in results[k][metric][p]]
-            y_avg = avg_results[k][metric][p].mcpd_estimation.y
-        plt.scatter(x, y, 5, alpha=0.6, marker='o', color=colors[idx])
-        plt.scatter(x_avg, y_avg, 75, alpha=0.6, marker='o', color=colors[idx])
-            
-    plot_store(k, metric, method)
+    # Get results for k = 3,5 and Chebyshev,Euclid norm, using Test set and Validation set
+    for k in [3,5]:
+        results[k] = {}
+        for metric in Metric:
+            results[k][metric] = {}
+            for p in configs.room.train_points:
+                results[k][metric][p] = [get_estimation_point_from_average(k, p, beacons, metric)]
 
-# Generate Histogram
-for k, metric, method in itertools.product([3, 5], [metric.EUCLID, metric.CHEBYSHEV], ["RSSI", "MCPD"]):
-    error = []
-    for idx,(p,point) in enumerate(configs.room.validation_points.items()):
-        if method == "RSSI":
-            error.extend([val.rssi_euc_error for val in results[k][metric][p]])
-        else:
-            error.extend([val.mcpd_euc_error for val in results[k][metric][p]])
-    print("{}, k={}, metric={}, Var: {}, Std: {}, Avg: {}, Max: {}, Min: {}".format(method, k, metric, np.var(error), np.std(error), np.mean(error), max(error), min(error)))
-    xlim = [0, ceil(max(error))]
-    histogram_boxplot(error, k, metric, method, xlim=xlim, bins=20)
+            # For each validation position
+            for p in configs.room.validation_points:
+                # Generate empty result list
+                results[k][metric][p] = []
+                # Load the dataframes at this position and store them in the dictionary
+                df = {}
+                for b in beacons:
+                    df[b.n] = pd.read_csv("{}position_{}_beacon_{}.csv".format(configs.validation_set_path, p, b.n))
+                # Check length of measurement, on first one
+                length = len(list(df.items())[0][1].index)
+                # For each measurement, perform an estimation
+                for i in range(length):
+                    # Storage element for the measurement to be performed
+                    measurement = pd.DataFrame()
+                    # Combine data from the individual beacons into 'measurement'
+                    for b in df.keys():
+                        val = df[b].iloc[i,2:].to_frame().T
+                        val.insert(0, 'position', p)
+                        val.insert(1, 'id', b)
+                        measurement = pd.concat([measurement, val])
+                    # Evaluate the measurement, and append to results
+                    results[k][metric][p].append(get_estimation_point(k, p, beacons, metric, measurement))        
+
+    # Get result for each position by first averaging 15 measurements ONLY for all beacons
+    # Generate plots ONLY for all beacons
+    if len(beacons) == len(configs.room.beacons):
+        # Compute average results:
+        avg_results: Dict[int, Dict[Metric, Dict[int, Result]]] = {}
+        for k in [3,5]:
+            avg_results[k] = {}
+            for metric in Metric:
+                avg_results[k][metric] = {}
+                for p in configs.room.train_points:
+                    avg_results[k][metric][p] = get_estimation_point_from_average(k, p, beacons, metric)
+                for p in configs.room.validation_points:
+                    avg_results[k][metric][p] = get_estimation_point_from_average(k, p, beacons, metric)
+
+        # Generate Markdown table with average results
+        print("# Estimation on the average of 15 measurements, calculating then stats")
+        for k in [3,5]:
+            for metric in Metric:
+                idx = [p.idx for p in avg_results[k][metric].values()]
+                # Calculate average results
+                rssi_error = [p.rssi_euc_error for p in avg_results[k][metric].values()]
+                mcpd_error = [p.mcpd_euc_error for p in avg_results[k][metric].values()]
+                # Create dataframe with this informations
+                df = pd.DataFrame(data=[rssi_error, mcpd_error], columns=idx).round(decimals=3)
+                df.insert(0, "Type", ["RSSI", "MCPD"])
+                # Write markdown table
+                writer = MarkdownTableWriter(
+                    table_name="k{}_{}_error".format(k, metric),
+                    margin=1,
+                )
+                writer.from_dataframe(
+                    df,
+                    add_index_column=False,
+                )
+                writer.set_style(0, Style(font_weight="bold"))
+                # Print Markdown Table
+                print(writer.dumps())
+
+
+        # Generate plots:
+        colors = [(0, 0.4470, 0.7410), (0.8500, 0.3250, 0.0980), (0.9290, 0.6940, 0.1250), (0.4940, 0.1840, 0.5560), (0.4660, 0.6740, 0.1880), (0.3010, 0.7450, 0.9330), (0.6350, 0.0780, 0.1840)]
+
+        # Generate overview plot
+        plot_beautify(0, None, None)
+        for idx, p in enumerate(configs.room.validation_points.values()):
+            plt.scatter(p.x, p.y, 75, marker='*', color=colors[idx])
+        plot_store(0, None, None)
+
+        for k, metric, method in itertools.product([3, 5], [Metric.EUCLID, Metric.CHEBYSHEV], ["RSSI", "MCPD"]):
+            # Generate plot
+            plot_beautify(k, metric, method)
+            for idx,(p,point) in enumerate(configs.room.validation_points.items()):
+                res = get_estimation_point_from_average(k, p, beacons, metric)
+                plt.scatter(point.x, point.y, 75, marker='*', color=colors[idx])
+                if method == "RSSI":
+                    x = [val.rssi_estimation.x for val in results[k][metric][p]]
+                    x_avg = avg_results[k][metric][p].rssi_estimation.x
+                    y = [val.rssi_estimation.y for val in results[k][metric][p]]
+                    y_avg = avg_results[k][metric][p].rssi_estimation.y
+                else:
+                    x = [val.mcpd_estimation.x for val in results[k][metric][p]]
+                    x_avg = avg_results[k][metric][p].mcpd_estimation.x
+                    y = [val.mcpd_estimation.y for val in results[k][metric][p]]
+                    y_avg = avg_results[k][metric][p].mcpd_estimation.y
+                plt.scatter(x, y, 5, alpha=0.6, marker='o', color=colors[idx])
+                plt.scatter(x_avg, y_avg, 75, alpha=0.6, marker='o', color=colors[idx])
+
+            plot_store(k, metric, method)
+
+        # Generate Histogram
+        print("# Estimation each measurement, calculating then stats")
+        for k, metric, method in itertools.product([3, 5], [Metric.EUCLID, Metric.CHEBYSHEV], ["RSSI", "MCPD"]):
+            error = []
+            for idx,(p,point) in enumerate(configs.room.validation_points.items()):
+                if method == "RSSI":
+                    error.extend([val.rssi_euc_error for val in results[k][metric][p]])
+                else:
+                    error.extend([val.mcpd_euc_error for val in results[k][metric][p]])
+            print("{}, k={}, metric={}, Var: {:.2f}, Std: {:.2f}, Avg: {:.2f}, Max: {:.2f}, Min: {:.2f}".format(method, k, metric, np.var(error), np.std(error), np.mean(error), max(error), min(error)))
+            all_results[len(beacons)][k][metric][method]["var"].append(np.var(error))
+            all_results[len(beacons)][k][metric][method]["std"].append(np.std(error))
+            all_results[len(beacons)][k][metric][method]["avg"].append(np.mean(error))
+            all_results[len(beacons)][k][metric][method]["max"].append(max(error))
+            all_results[len(beacons)][k][metric][method]["min"].append(min(error))
+            xlim = [0, ceil(max(error))]
+            histogram_boxplot(error, k, metric, method, xlim=xlim, bins=20)
+    else:
+        # Print results
+        print("# Estimation each measurement, calculating then stats")
+        for k, metric, method in itertools.product([3, 5], [Metric.EUCLID, Metric.CHEBYSHEV], ["RSSI", "MCPD"]):
+            error = []
+            for idx,(p,point) in enumerate(configs.room.validation_points.items()):
+                if method == "RSSI":
+                    error.extend([val.rssi_euc_error for val in results[k][metric][p]])
+                else:
+                    error.extend([val.mcpd_euc_error for val in results[k][metric][p]])
+            print("{}, k={}, metric={}, Var: {:.3f}, Std: {:.3f}, Avg: {:.3f}, Max: {:.3f}, Min: {:.3f}".format(method, k, metric, np.var(error), np.std(error), np.mean(error), max(error), min(error)))        
+            all_results[len(beacons)][k][metric][method]["var"].append(np.var(error))
+            all_results[len(beacons)][k][metric][method]["std"].append(np.std(error))
+            all_results[len(beacons)][k][metric][method]["avg"].append(np.mean(error))
+            all_results[len(beacons)][k][metric][method]["max"].append(max(error))
+            all_results[len(beacons)][k][metric][method]["min"].append(min(error))
+    print("")
+
+for i in range(3, len(configs.room.beacons)+1):
+    print("# Overall stats for {} Beacon setups:".format(i))
+    for k, metric, method in itertools.product([3, 5], [Metric.EUCLID, Metric.CHEBYSHEV], ["RSSI", "MCPD"]):
+        print("{}, k={}, metric={}, Var: {:.3f}, Std: {:.3f}, Avg: {:.3f}, Max: {:.3f}, Min: {:.3f}".format(method, k, metric, np.mean(all_results[i][k][metric][method]["var"]), np.mean(all_results[i][k][metric][method]["std"]), np.mean(all_results[i][k][metric][method]["avg"]), max(all_results[i][k][metric][method]["max"]), min(all_results[i][k][metric][method]["min"])))

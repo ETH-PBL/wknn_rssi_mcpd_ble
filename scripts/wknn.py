@@ -72,7 +72,7 @@ class Result:
         )
 
 
-def get_norm(measurement, reference, metric: Metric):
+def get_norm(measurement, reference, beacons, metric: Metric):
     """Computes the norm from a measurement to all reference measurements
 
     :param measurement: A Dataframe containing headers 'id', 'rssi', 'mcpd_ifft' - and exactly one row per beacon/id'
@@ -100,7 +100,7 @@ def get_norm(measurement, reference, metric: Metric):
         mcpd_r = dict(zip(mcpd_r["id"], mcpd_r["mcpd_ifft"]))
 
         # For each beacon in the room, calculate the vector difference between measurement and reference
-        for b in configs.room.beacons:
+        for b in beacons:
             rssi_vector_diff.append(rssi_m[b.n] - rssi_r[b.n])
             mcpd_vector_diff.append(mcpd_m[b.n] - mcpd_r[b.n])
 
@@ -126,7 +126,7 @@ def compute_estimation(closest: Dict[int, float]) -> Point:
     return estimate
 
 
-def get_estimation_point(k: int, point: int, metric: Metric, measurement):
+def get_estimation_point(k: int, point: int, beacons, metric: Metric, measurement):
     """Computes a result for MCPD and RSSI for a given ground-truth point and a given measurement
 
     :param k: k-closest Neighbors
@@ -150,7 +150,7 @@ def get_estimation_point(k: int, point: int, metric: Metric, measurement):
         raise ValueError("Point {} does not exist".format(point))
 
     # Get norm distances between the trainings data and the measurement for all trainings points
-    (rssi, mcpd) = get_norm(measurement, reference, metric)
+    (rssi, mcpd) = get_norm(measurement, reference, beacons, metric)
 
     ### As insertion order is preserved: sort them by value to get k closest neighbors:
     # Get index
@@ -183,7 +183,7 @@ def get_estimation_point(k: int, point: int, metric: Metric, measurement):
         mcpd_euc_error=mcpd_error,
     )
 
-def get_estimation_point_from_average(k: int, point: int, metric: Metric):
+def get_estimation_point_from_average(k: int, point: int, beacons, metric: Metric):
     """Computes a result for MCPD and RSSI for a given ground-truth point
     :param k: k-closest Neighbors
     :param point: integer, pointing to the number of the measurement position
@@ -207,4 +207,4 @@ def get_estimation_point_from_average(k: int, point: int, metric: Metric):
         measurement = test[test["position"] == point]
     else:
         raise ValueError("Point {} does not exist".format(point))
-    return get_estimation_point(k, point, metric, measurement)
+    return get_estimation_point(k, point, beacons, metric, measurement)
