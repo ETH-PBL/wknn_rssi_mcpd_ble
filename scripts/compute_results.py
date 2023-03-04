@@ -7,9 +7,11 @@ from wknn import Metric, get_estimation_point, Result, get_estimation_point_from
 from pytablewriter import MarkdownTableWriter
 from pytablewriter.style import Style
 import matplotlib.pyplot as plt
+from math import ceil
+import seaborn as sns
 import pandas as pd
 import itertools
-
+import numpy as np
 
 def plot_beautify(k, metric, method: str):
     LIMIT_TOL = 0.5
@@ -46,10 +48,48 @@ def plot_beautify(k, metric, method: str):
 def plot_store(k, metric, method):
     if k == 0:
         plt.legend(["Beacons","Train Pos.","Reference"], scatteryoffsets=[0.5,0.5,0.5], bbox_to_anchor=(0.5,1.1), ncol=3, columnspacing=0.5, handletextpad=-0.2, loc='upper center')
+        leg = plt.gca().get_legend()
+        leg.legendHandles[2].set_edgecolor('k')
+        leg.legendHandles[2].set_facecolor('#FFFFFF')
         plt.savefig("../figures/room_setup.svg")
+        #plt.show()
+        plt.close('all')
     else:
         plt.legend(["Beacons","Train Pos.","Ref.","Est.", "Avg. Est."], scatteryoffsets=[0.5,0.5,0.5,0.5,0.5], bbox_to_anchor=(0.5,1.1), ncol=5, columnspacing=0.4, handletextpad=-0.3, loc='upper center')
+        leg = plt.gca().get_legend()
+        for i in range(2,5):
+            leg.legendHandles[i].set_edgecolor('k')
+            leg.legendHandles[i].set_facecolor('#FFFFFF')
         plt.savefig("../figures/k{}_{}_{}.svg".format(k, str(metric).lower(), method.lower()))
+        #plt.show()
+        plt.close('all')
+
+def histogram_boxplot(data, k, metric, method: str, xlim: List = [], bins = None):
+    sns.set_theme()
+    sns.set_style("whitegrid")
+    sns.set_style({'mathtext.fontset': 'stix',
+        'font.family': 'STIXGeneral',
+        'font.size': 12,
+        'axes.edgecolor': 'black',
+        'axes.linewidth': 1})
+    sns.set_context(font_scale=2)
+    f, (ax_box, ax_hist) = plt.subplots(2, gridspec_kw={"height_ratios": (.15, .85)})
+    sns.boxplot(data, ax=ax_box, orient='h')
+    sns.histplot(data, ax=ax_hist, bins=bins, kde=True) if bins else sns.histplot(data, ax=ax_hist, kde=True, stat='density')
+    ax_box.set(yticks=[], xticks=[])
+    ax_hist.set(xlabel="Estimation error in m")
+    if len(xlim) != 0: ax_hist.set(xlim=xlim)
+    if len(xlim) != 0: ax_box.set(xlim=xlim)
+
+    if metric == Metric.CHEBYSHEV:
+        tit_metric = "\\infty"
+    else:
+        tit_metric = "2"
+    plt.suptitle("\\textbf{{{}-Error for wkNN with $k={}$, $||\\cdot||_{}$}}".format(method, k, tit_metric), y=0.95)
+    plt.tight_layout()
+    plt.savefig("../figures/hist_k{}_{}_{}.svg".format(k, str(metric).lower(), method.lower()))
+    #plt.show()
+    plt.close('all')
 
         
 # Dict[k][metric][point] = List[Result]
@@ -151,4 +191,14 @@ for k, metric, method in itertools.product([3, 5], [metric.EUCLID, metric.CHEBYS
             
     plot_store(k, metric, method)
 
-plt.show()
+# Generate Histogram
+for k, metric, method in itertools.product([3, 5], [metric.EUCLID, metric.CHEBYSHEV], ["RSSI", "MCPD"]):
+    error = []
+    for idx,(p,point) in enumerate(configs.room.validation_points.items()):
+        if method == "RSSI":
+            error.extend([val.rssi_euc_error for val in results[k][metric][p]])
+        else:
+            error.extend([val.mcpd_euc_error for val in results[k][metric][p]])
+    print("{}, k={}, metric={}, Var: {}, Std: {}, Avg: {}, Max: {}, Min: {}".format(method, k, metric, np.var(error), np.std(error), np.mean(error), max(error), min(error)))
+    xlim = [0, ceil(max(error))]
+    histogram_boxplot(error, k, metric, method, xlim=xlim, bins=20)
